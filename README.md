@@ -73,6 +73,3 @@ CREATE TABLE voos_info (
 );
 ```
 
----
-
-Esse `README.md` cobre os principais pontos técnicos e já pode ser usado diretamente. Quer que eu gere o conteúdo automaticamente com base em um nome de projeto específico ou descrição personalizada?
