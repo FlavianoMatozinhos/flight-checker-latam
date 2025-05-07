@@ -1,68 +1,79 @@
-from amadeus_client import get_amadeus_client, search_flights
-from database import get_db_connection, insert_flight_data
-from flight_utils import convert_to_brazil_time, format_datetime, filter_latam_flights, get_cheapest_flight
+from amadeus_client import init_amadeus_client, search_flights
+from db import get_connection, save_flight_info
+from utils import to_brazil_time, now_brazil_str
+from telegram import send_telegram_message
 
-# Parâmetros da busca
 ORIGEM = 'GRU'
 DESTINO = 'MLA'
 DATA_IDA = '2025-11-08'
 ADULTOS = 1
 
 def main():
-    amadeus = get_amadeus_client()
+    amadeus = init_amadeus_client()
     voos = search_flights(amadeus, ORIGEM, DESTINO, DATA_IDA, ADULTOS)
 
     if not voos:
         print("Nenhum voo encontrado.")
         return
 
-    voos_latam = filter_latam_flights(voos)
+    voos_latam = [
+        voo for voo in voos if any(
+            s['carrierCode'].upper() == 'LA'
+            for i in voo['itineraries']
+            for s in i['segments']
+        )
+    ]
 
     if not voos_latam:
         print("Nenhum voo da LATAM encontrado.")
         return
 
-    voo_mais_barato = get_cheapest_flight(voos_latam)
-    preco = voo_mais_barato['price']['total']
-    moeda = voo_mais_barato['price']['currency']
-    print(f"\n💰 Voo mais barato da LATAM: {preco} {moeda}")
+    mais_barato = min(voos_latam, key=lambda v: float(v['price']['total']))
+    preco = mais_barato['price']['total']
+    moeda = mais_barato['price']['currency']
+    carrier = mais_barato['itineraries'][0]['segments'][0]['carrierCode']
+    
+    mensagem = f"💰 Voo mais barato da companhia {carrier}: {preco} {moeda}\n\n"
+    mensagem += "✈️ Itinerários:\n"
+    mensagem += f"🛫 {ORIGEM} ➜ {DESTINO} | {DATA_IDA}\n"
 
-    db = get_db_connection()
-    cursor = db.cursor()
+    for it in mais_barato['itineraries']:
+        for seg in it['segments']:
+            dep = seg['departure']['iataCode']
+            arr = seg['arrival']['iataCode']
+            num = f"{seg['carrierCode']}{seg['number']}"
+            mensagem += f"{dep} ➜ {arr} | {num}\n"
 
-    for itinerary in voo_mais_barato['itineraries']:
-        for segment in itinerary['segments']:
-            dep = segment['departure']
-            arr = segment['arrival']
+    send_telegram_message(mensagem)
 
-            dep_time = convert_to_brazil_time(dep['at'])
-            arr_time = convert_to_brazil_time(arr['at'])
+    conn = get_connection()
+    cursor = conn.cursor()
 
-            dep_time_str = format_datetime(dep_time)
-            arr_time_str = format_datetime(arr_time)
+    for it in mais_barato['itineraries']:
+        for seg in it['segments']:
+            dep_time = to_brazil_time(seg['departure']['at'])
+            arr_time = to_brazil_time(seg['arrival']['at'])
 
-            print(f"    {dep['iataCode']} ({dep_time_str}) ➜ {arr['iataCode']} ({arr_time_str}) | {segment['carrierCode']}{segment['number']}")
-
-            flight_data = (
+            data = (
                 ORIGEM,
                 DESTINO,
                 DATA_IDA,
-                None,  # Data de volta não disponível
+                0,
                 preco,
                 moeda,
-                segment['carrierCode'],
-                segment['number'],
-                dep['iataCode'],
-                dep_time_str,
-                arr['iataCode'],
-                arr_time_str
+                seg['carrierCode'],
+                seg['number'],
+                seg['departure']['iataCode'],
+                dep_time.strftime('%d/%m/%Y %H:%M:%S'),
+                seg['arrival']['iataCode'],
+                arr_time.strftime('%d/%m/%Y %H:%M:%S'),
+                now_brazil_str()
             )
+            save_flight_info(cursor, data)
 
-            insert_flight_data(cursor, flight_data)
-
-    db.commit()
+    conn.commit()
     cursor.close()
-    db.close()
+    conn.close()
 
 if __name__ == "__main__":
     main()

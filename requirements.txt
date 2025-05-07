@@ -1,4 +1,5 @@
-python-dotenv
+requests
 amadeus
-mysql-connector-python
+python-dotenv
 pytz
+mysql-connector-python

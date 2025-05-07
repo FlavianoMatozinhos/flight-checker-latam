@@ -72,4 +72,3 @@ CREATE TABLE voos_info (
     arrivalTime DATETIME
 );
 ```
-
